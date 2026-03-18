@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"cliamp/external/local"
 	"cliamp/external/navidrome"
 	"cliamp/lyrics"
 	"cliamp/player"
@@ -61,6 +63,20 @@ type ytdlSavedMsg struct {
 	err  error
 }
 
+// urlPlaylistImportedMsg signals that importing a URL into a local playlist completed.
+type urlPlaylistImportedMsg struct {
+	name  string
+	count int
+	err   error
+}
+
+// linkedPlaylistRefreshedMsg signals that syncing a linked local playlist completed.
+type linkedPlaylistRefreshedMsg struct {
+	name  string
+	count int
+	err   error
+}
+
 // — Navidrome browser message types —
 
 // navArtistsLoadedMsg carries the full artist list from getArtists.
@@ -112,6 +128,51 @@ func resolveRemoteCmd(urls []string) tea.Cmd {
 			return err
 		}
 		return feedsLoadedMsg{tracks: tracks, urls: urls}
+	}
+}
+
+func importURLPlaylistCmd(localProv *local.Provider, name, rawURL string) tea.Cmd {
+	return func() tea.Msg {
+		if localProv == nil {
+			return urlPlaylistImportedMsg{name: name, err: fmt.Errorf("local playlist provider unavailable")}
+		}
+		tracks, err := resolve.Remote([]string{rawURL})
+		if err != nil {
+			return urlPlaylistImportedMsg{name: name, err: err}
+		}
+		if len(tracks) == 0 {
+			return urlPlaylistImportedMsg{name: name, count: 0}
+		}
+		if err := localProv.SaveLinkedPlaylist(name, rawURL, tracks); err != nil {
+			return urlPlaylistImportedMsg{name: name, err: err}
+		}
+		return urlPlaylistImportedMsg{name: name, count: len(tracks)}
+	}
+}
+
+func refreshLinkedPlaylistCmd(localProv *local.Provider, name string) tea.Cmd {
+	return func() tea.Msg {
+		if localProv == nil {
+			return linkedPlaylistRefreshedMsg{name: name, err: fmt.Errorf("local playlist provider unavailable")}
+		}
+		sourceURL, err := localProv.SourceURL(name)
+		if err != nil {
+			return linkedPlaylistRefreshedMsg{name: name, err: err}
+		}
+		if sourceURL == "" {
+			return linkedPlaylistRefreshedMsg{name: name, err: fmt.Errorf("playlist is not linked to a source URL")}
+		}
+		tracks, err := resolve.Remote([]string{sourceURL})
+		if err != nil {
+			return linkedPlaylistRefreshedMsg{name: name, err: err}
+		}
+		if len(tracks) == 0 {
+			return linkedPlaylistRefreshedMsg{name: name, count: 0}
+		}
+		if err := localProv.SaveLinkedPlaylist(name, sourceURL, tracks); err != nil {
+			return linkedPlaylistRefreshedMsg{name: name, err: err}
+		}
+		return linkedPlaylistRefreshedMsg{name: name, count: len(tracks)}
 	}
 }
 

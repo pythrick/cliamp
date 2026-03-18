@@ -46,6 +46,7 @@ Press `Ctrl+K` in the player to see all keybindings.
 | `f` | Find on YouTube (queue play next) |
 | `F` | Find on SoundCloud (queue play next) |
 | `u` | Load URL (stream/playlist) |
+| `U` | Import URL as persistent local playlist (`name | url`) |
 | `y` | Show lyrics |
 | `S` | Save track to ~/Music |
 | `N` | Navidrome browser |
@@ -57,6 +58,7 @@ Press `Ctrl+K` in the player to see all keybindings.
 | `a` | Toggle queue (play next) |
 | `A` | Queue manager |
 | `p` | Playlist manager |
+| `R` | Refresh linked local playlist (in playlist manager) |
 | `r` | Cycle repeat (Off / All / One) |
 | `z` | Toggle shuffle |
 

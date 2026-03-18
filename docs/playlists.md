@@ -85,6 +85,12 @@ Each `[[track]]` section supports:
 
 HTTP/HTTPS paths are automatically treated as streams.
 
+Optional top-level key for linked playlists:
+
+| Key | Description |
+|-----|-------------|
+| `source_url` | Original URL used to import/sync the playlist |
+
 ### Browsing and Loading Playlists
 
 Running `cliamp` without arguments connects to the built-in radio channel. If Navidrome is configured, it opens the provider browser instead.
@@ -110,6 +116,7 @@ Press `p` from any view to open the playlist manager:
 5. **Remove track** — open a playlist, highlight a track, press `d` to remove it
 6. **Play all** — press `Enter` on the track list to load all tracks into the player
 7. **New playlist** — select "+ New Playlist...", type a name, and press Enter
+8. **Refresh linked playlist** — on playlist list screen, press `R` to re-sync from `source_url`
 
 The directory `~/.config/cliamp/playlists/` is created automatically on first use. Removing the last track from a playlist auto-deletes the file.
 
@@ -153,6 +160,6 @@ title = "My Radio"
 | `Up` `Down` / `j` `k` | Navigate |
 | `Enter` / `→` | Open playlist / Play all tracks |
 | `a` | Add currently playing track |
+| `R` | Refresh linked playlist from `source_url` |
 | `d` | Delete playlist (confirms) / Remove track |
 | `Esc` / `←` | Close / Go back |
-

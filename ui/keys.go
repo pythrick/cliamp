@@ -420,6 +420,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case "u":
 		m.urlInputting = true
+		m.urlImporting = false
+		m.urlInput = ""
+
+	case "U":
+		m.urlInputting = true
+		m.urlImporting = true
 		m.urlInput = ""
 
 	case "N":
@@ -748,23 +754,55 @@ func (m *Model) handleURLInputKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Type {
 	case tea.KeyEscape:
 		m.urlInputting = false
+		m.urlImporting = false
 	case tea.KeyEnter:
-		m.urlInputting = false
 		input := strings.TrimSpace(m.urlInput)
-		if input != "" {
-			m.feedLoading = true
-			m.status.text = "Loading URL..."
-			m.status.ttl = 120
-			return resolveRemoteCmd([]string{input})
+		if input == "" {
+			return nil
 		}
+		if m.urlImporting {
+			name, rawURL, ok := parseURLPlaylistImportInput(input)
+			if !ok {
+				m.status.text = "Format: playlist name | url"
+				m.status.ttl = 80
+				return nil
+			}
+			m.urlInputting = false
+			m.urlImporting = false
+			m.feedLoading = true
+			m.status.text = "Importing URL into playlist..."
+			m.status.ttl = 120
+			return importURLPlaylistCmd(m.localProvider, name, rawURL)
+		}
+		m.urlInputting = false
+		m.urlImporting = false
+		m.feedLoading = true
+		m.status.text = "Loading URL..."
+		m.status.ttl = 120
+		return resolveRemoteCmd([]string{input})
 	case tea.KeyBackspace:
 		m.urlInput = removeLastRune(m.urlInput)
+	case tea.KeySpace:
+		m.urlInput += " "
 	default:
 		if msg.Type == tea.KeyRunes {
 			m.urlInput += string(msg.Runes)
 		}
 	}
 	return nil
+}
+
+func parseURLPlaylistImportInput(input string) (name, rawURL string, ok bool) {
+	left, right, found := strings.Cut(input, "|")
+	if !found {
+		return "", "", false
+	}
+	name = strings.TrimSpace(left)
+	rawURL = strings.TrimSpace(right)
+	if name == "" || rawURL == "" {
+		return "", "", false
+	}
+	return name, rawURL, true
 }
 
 // handlePlaylistManagerKey dispatches keys to the active manager screen.
@@ -834,6 +872,14 @@ func (m *Model) handlePlMgrListKey(msg tea.KeyMsg) tea.Cmd {
 	case "d":
 		if m.plManager.cursor < len(m.plManager.playlists) {
 			m.plManager.confirmDel = true
+		}
+	case "R":
+		if m.plManager.cursor < len(m.plManager.playlists) {
+			name := m.plManager.playlists[m.plManager.cursor].Name
+			m.feedLoading = true
+			m.status.text = fmt.Sprintf("Refreshing \"%s\"...", name)
+			m.status.ttl = 120
+			return refreshLinkedPlaylistCmd(m.localProvider, name)
 		}
 	case "esc", "p":
 		m.plManager.visible = false

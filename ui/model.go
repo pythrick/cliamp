@@ -150,6 +150,7 @@ type Model struct {
 	// URL input mode (load playlist/stream URL at runtime)
 	urlInputting bool
 	urlInput     string
+	urlImporting bool // true when URL input should import as persistent local playlist
 
 	// Async feed/M3U URL resolution
 	pendingURLs []string
@@ -924,6 +925,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status.text = "No tracks found at URL."
 			m.status.ttl = 60
+		}
+		return m, nil
+
+	case urlPlaylistImportedMsg:
+		m.feedLoading = false
+		if msg.err != nil {
+			m.status.text = fmt.Sprintf("Import failed: %v", msg.err)
+			m.status.ttl = 90
+			return m, nil
+		}
+		if msg.count == 0 {
+			m.status.text = "No tracks found at URL."
+			m.status.ttl = 60
+			return m, nil
+		}
+		m.status.text = fmt.Sprintf("Saved %d track(s) to \"%s\"", msg.count, msg.name)
+		m.status.ttl = 90
+		if m.plManager.visible && m.plManager.screen == plMgrScreenList {
+			m.plMgrRefreshList()
+		}
+		return m, nil
+
+	case linkedPlaylistRefreshedMsg:
+		m.feedLoading = false
+		if msg.err != nil {
+			m.status.text = fmt.Sprintf("Refresh failed: %v", msg.err)
+			m.status.ttl = 90
+			return m, nil
+		}
+		if msg.count == 0 {
+			m.status.text = "No tracks found at source URL."
+			m.status.ttl = 60
+			return m, nil
+		}
+		m.status.text = fmt.Sprintf("Refreshed \"%s\" (%d track(s))", msg.name, msg.count)
+		m.status.ttl = 90
+		if m.plManager.visible && m.plManager.screen == plMgrScreenList {
+			m.plMgrRefreshList()
 		}
 		return m, nil
 

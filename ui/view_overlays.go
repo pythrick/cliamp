@@ -53,7 +53,6 @@ func (m Model) renderKeymapOverlay() string {
 	return m.centerOverlay(strings.Join(lines, "\n"))
 }
 
-
 func (m Model) renderThemePicker() string {
 	lines := []string{
 		titleStyle.Render("T H E M E S"),
@@ -135,7 +134,7 @@ func (m Model) renderPlMgrList() []string {
 		lines = append(lines, "", dimStyle.Render(fmt.Sprintf("  %d/%d playlists", m.plManager.cursor+1, count)))
 	}
 
-	lines = append(lines, "", helpKey("↑↓", "Navigate ")+helpKey("Enter/→", "Open ")+helpKey("a", "Add track ")+helpKey("d", "Delete ")+helpKey("Esc", "Close"))
+	lines = append(lines, "", helpKey("↑↓", "Navigate ")+helpKey("Enter/→", "Open ")+helpKey("a", "Add track ")+helpKey("R", "Refresh link ")+helpKey("d", "Delete ")+helpKey("Esc", "Close"))
 
 	return lines
 }
@@ -317,12 +316,23 @@ func (m Model) renderNetSearchOverlay() string {
 }
 
 func (m Model) renderURLInputOverlay() string {
+	title := titleStyle.Render("L O A D   U R L")
+	label := "  URL: " + m.urlInput + "_"
+	help := helpKey("Enter", "Load") + " " + helpKey("Esc", "Cancel")
+	if m.urlImporting {
+		title = titleStyle.Render("I M P O R T   U R L   P L A Y L I S T")
+		label = "  Name | URL: " + m.urlInput + "_"
+		help = helpKey("Enter", "Import") + " " + helpKey("Esc", "Cancel")
+	}
 	lines := []string{
-		titleStyle.Render("L O A D   U R L"),
+		title,
 		"",
-		playlistSelectedStyle.Render("  URL: " + m.urlInput + "_"),
+		playlistSelectedStyle.Render(label),
 		"",
-		helpKey("Enter", "Load") + " " + helpKey("Esc", "Cancel"),
+		help,
+	}
+	if m.urlImporting {
+		lines = append(lines, "", dimStyle.Render("  Example: My YT Mix | https://music.youtube.com/playlist?list=..."))
 	}
 	return m.centerOverlay(strings.Join(lines, "\n"))
 }

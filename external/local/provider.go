@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"cliamp/internal/appdir"
 	"cliamp/internal/tomlutil"
@@ -21,6 +22,10 @@ import (
 // Provider reads and writes TOML-based playlists stored on disk.
 type Provider struct {
 	dir string // e.g. ~/.config/cliamp/playlists/
+}
+
+type playlistMeta struct {
+	sourceURL string
 }
 
 // New creates a Provider using ~/.config/cliamp/playlists/ as the base directory.
@@ -34,14 +39,47 @@ func New() *Provider {
 
 func (p *Provider) Name() string { return "Local Playlists" }
 
+func slugifyPlaylistName(name string) string {
+	name = strings.TrimSpace(strings.ToLower(name))
+	var b strings.Builder
+	prevDash := false
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if s == "" {
+		return "playlist"
+	}
+	return s
+}
+
 // safePath validates a playlist name and returns the absolute path to its TOML
-// file, ensuring the result stays within p.dir. This prevents path traversal
-// via names containing ".." or path separators.
+// file, ensuring the result stays within p.dir. Existing non-slug legacy files
+// are respected; new files default to slugified filenames.
 func (p *Provider) safePath(name string) (string, error) {
 	if strings.ContainsAny(name, "/\\") || name == ".." || name == "." || name == "" {
 		return "", fmt.Errorf("invalid playlist name %q", name)
 	}
-	resolved := filepath.Join(p.dir, name+".toml")
+
+	exact := filepath.Join(p.dir, name+".toml")
+	slug := filepath.Join(p.dir, slugifyPlaylistName(name)+".toml")
+	resolved := slug
+
+	// Backward compatibility: if a legacy non-slug file exists, keep using it.
+	if _, err := os.Stat(exact); err == nil {
+		resolved = exact
+	} else if _, err := os.Stat(slug); err == nil {
+		resolved = slug
+	}
+
 	if !strings.HasPrefix(resolved, filepath.Clean(p.dir)+string(filepath.Separator)) {
 		return "", fmt.Errorf("playlist path escapes base directory")
 	}
@@ -65,7 +103,7 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		tracks, err := p.loadTOML(filepath.Join(p.dir, e.Name()))
+		tracks, _, err := p.loadTOML(filepath.Join(p.dir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -84,7 +122,21 @@ func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.loadTOML(path)
+	tracks, _, err := p.loadTOML(path)
+	return tracks, err
+}
+
+// SourceURL returns the linked source URL for a playlist, if set.
+func (p *Provider) SourceURL(playlistID string) (string, error) {
+	path, err := p.safePath(playlistID)
+	if err != nil {
+		return "", err
+	}
+	_, meta, err := p.loadTOML(path)
+	if err != nil {
+		return "", err
+	}
+	return meta.sourceURL, nil
 }
 
 // AddTrack appends a track to the named playlist, creating the directory and
@@ -115,12 +167,26 @@ func (p *Provider) AddTrack(playlistName string, track playlist.Track) error {
 
 // SavePlaylist overwrites the named playlist with the given tracks.
 func (p *Provider) SavePlaylist(name string, tracks []playlist.Track) error {
-	if err := os.MkdirAll(p.dir, 0o755); err != nil {
-		return err
-	}
-
 	path, err := p.safePath(name)
 	if err != nil {
+		return err
+	}
+	// Preserve existing source_url when overwriting through normal operations.
+	_, meta, _ := p.loadTOML(path)
+	return p.writePlaylist(path, tracks, meta.sourceURL)
+}
+
+// SaveLinkedPlaylist overwrites the named playlist and sets its source URL.
+func (p *Provider) SaveLinkedPlaylist(name, sourceURL string, tracks []playlist.Track) error {
+	path, err := p.safePath(name)
+	if err != nil {
+		return err
+	}
+	return p.writePlaylist(path, tracks, strings.TrimSpace(sourceURL))
+}
+
+func (p *Provider) writePlaylist(path string, tracks []playlist.Track, sourceURL string) error {
+	if err := os.MkdirAll(p.dir, 0o755); err != nil {
 		return err
 	}
 	f, err := os.Create(path)
@@ -128,6 +194,10 @@ func (p *Provider) SavePlaylist(name string, tracks []playlist.Track) error {
 		return err
 	}
 	defer f.Close()
+
+	if sourceURL != "" {
+		fmt.Fprintf(f, "source_url = %q\n\n", sourceURL)
+	}
 
 	for i, t := range tracks {
 		if i > 0 {
@@ -186,16 +256,17 @@ func writeTrack(w io.Writer, t playlist.Track) {
 	}
 }
 
-// loadTOML parses a minimal TOML file with [[track]] sections.
-// Each section supports path, title, and artist keys.
-func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
+// loadTOML parses a minimal TOML file with optional source_url metadata and
+// [[track]] sections. Each track section supports path, title, and artist keys.
+func (p *Provider) loadTOML(path string) ([]playlist.Track, playlistMeta, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, playlistMeta{}, err
 	}
 
 	var tracks []playlist.Track
 	var current *playlist.Track
+	var meta playlistMeta
 
 	for _, rawLine := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(rawLine)
@@ -214,10 +285,6 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 			continue
 		}
 
-		if current == nil {
-			continue
-		}
-
 		// Parse key = "value" lines.
 		key, val, ok := strings.Cut(line, "=")
 		if !ok {
@@ -226,6 +293,13 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
 		val = tomlutil.Unquote(val)
+
+		if current == nil {
+			if key == "source_url" {
+				meta.sourceURL = val
+			}
+			continue
+		}
 
 		switch key {
 		case "path":
@@ -252,6 +326,5 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 	if current != nil {
 		tracks = append(tracks, *current)
 	}
-	return tracks, nil
+	return tracks, meta, nil
 }
-
