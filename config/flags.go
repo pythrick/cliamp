@@ -12,6 +12,7 @@ type Overrides struct {
 	Shuffle         *bool
 	Repeat          *string
 	Mono            *bool
+	Telemetry       *bool
 	Provider        *string
 	Theme           *string
 	Visualizer      *string
@@ -37,6 +38,9 @@ func (o Overrides) Apply(cfg *Config) {
 	}
 	if o.Mono != nil {
 		cfg.Mono = *o.Mono
+	}
+	if o.Telemetry != nil {
+		cfg.Telemetry = *o.Telemetry
 	}
 	if o.Provider != nil {
 		cfg.Provider = *o.Provider
@@ -101,6 +105,8 @@ func ParseFlags(args []string) (action string, ov Overrides, positional []string
 			ov.Mono = ptrBool(true)
 		case "--no-mono":
 			ov.Mono = ptrBool(false)
+		case "--no-telemetry":
+			ov.Telemetry = ptrBool(false)
 		case "--auto-play":
 			ov.Play = ptrBool(true)
 		case "--compact":

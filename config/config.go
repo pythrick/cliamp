@@ -108,12 +108,13 @@ func (y YouTubeMusicConfig) ResolveCredentials(fallbackFn func() (string, string
 
 // Config holds user preferences loaded from the config file.
 type Config struct {
-	Volume          float64            // dB, range [-30, +6]
-	EQ              [10]float64        // per-band gain in dB, range [-12, +12]
-	EQPreset        string             // preset name, or "" for custom
-	Repeat          string             // "off", "all", or "one"
+	Volume          float64     // dB, range [-30, +6]
+	EQ              [10]float64 // per-band gain in dB, range [-12, +12]
+	EQPreset        string      // preset name, or "" for custom
+	Repeat          string      // "off", "all", or "one"
 	Shuffle         bool
 	Mono            bool
+	Telemetry       bool               // anonymous monthly ping (UUID + app version)
 	SeekStepLarge   int                // seconds for Shift+Left/Right seek jumps
 	Provider        string             // default provider: "radio", "navidrome", "spotify", "ytmusic" (default "radio")
 	Theme           string             // theme name, or "" for ANSI default
@@ -135,6 +136,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Repeat:          "off",
+		Telemetry:       true,
 		SeekStepLarge:   30,
 		SampleRate:      0,
 		BufferMs:        100,
@@ -223,6 +225,11 @@ func Load() (Config, error) {
 			case "cookies_from":
 				cfg.YouTubeMusic.CookiesFrom = strings.Trim(val, `"'`)
 			}
+		case "telemetry":
+			switch key {
+			case "enabled":
+				cfg.Telemetry = strings.ToLower(val) == "true"
+			}
 		default:
 			switch key {
 			case "volume":
@@ -239,6 +246,8 @@ func Load() (Config, error) {
 				cfg.Shuffle = val == "true"
 			case "mono":
 				cfg.Mono = val == "true"
+			case "telemetry", "telemetry.enabled":
+				cfg.Telemetry = strings.ToLower(val) == "true"
 			case "seek_large_step_sec":
 				if v, err := strconv.Atoi(val); err == nil {
 					cfg.SeekStepLarge = v

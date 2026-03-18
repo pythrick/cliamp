@@ -12,9 +12,21 @@ That's it. No IP logging, no usage data, no personal information.
 ## How it works
 
 1. On first launch, a random UUID is generated and saved to `~/.config/cliamp/.telemetry_id`
-2. Each launch checks if a ping has already been sent this month
-3. If not, a single background GET request is sent to `https://telemetry.cliamp.stream/ping`
-4. The request is fire-and-forget — it never blocks the app or surfaces errors
+2. A one-time startup notice explains telemetry and how to disable it
+3. Each launch checks if a ping has already been sent this month
+4. If not, a single background `POST` request is sent to `https://telemetry.cliamp.stream/ping`
+5. The request is fire-and-forget — it never blocks the app or surfaces errors
+
+The JSON payload is:
+
+```json
+{"uuid":"<random-id>","version":"<cliamp-version>"}
+```
+
+## Disable telemetry
+
+- Persistent: set `telemetry = false` in `~/.config/cliamp/config.toml`
+- One-off session: run `cliamp --no-telemetry`
 
 ## Storage
 

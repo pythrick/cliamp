@@ -46,6 +46,7 @@ Press `f` in the player to search YouTube interactively, or `F` (Shift+F) to sea
 |------|-------|-------------|
 | `--help` | `-h` | Show help and exit |
 | `--version` | `-v` | Print version and exit |
+| `--no-telemetry` | | Disable telemetry for this session |
 | `--upgrade` | | Update to the latest release |
 
 ## Mixing flags and files
@@ -67,6 +68,7 @@ cliamp track.mp3 --repeat all --mono ~/Music
 | `--mono` / `--no-mono` | bool | false | |
 | `--auto-play` | bool | false | |
 | `--compact` | bool | false | |
+| `--no-telemetry` | bool | false | |
 | `--theme` | string | | theme name |
 | `--eq-preset` | string | | preset name |
 | `--sample-rate` | int | 44100 | 22050, 44100, 48000, 96000, 192000 |

@@ -20,8 +20,9 @@ import (
 const endpoint = "https://telemetry.cliamp.stream/ping"
 
 type state struct {
-	ID        string `json:"id"`
-	LastMonth string `json:"last_month"` // "2006-01"
+	ID         string `json:"id"`
+	LastMonth  string `json:"last_month"` // "2006-01"
+	NoticeSeen bool   `json:"notice_seen,omitempty"`
 }
 
 func stateFile() (string, error) {
@@ -69,6 +70,7 @@ func save(path string, s state) {
 // month. It is fire-and-forget: errors are silently ignored so they
 // never affect the user experience.
 func Ping(version string) {
+	firstRun := false
 	s, path, err := load()
 	if err != nil {
 		// First run or corrupt file — generate a new ID.
@@ -78,9 +80,18 @@ func Ping(version string) {
 		}
 		path = p
 		s = state{ID: newUUID()}
+		firstRun = true
 	}
 	if s.ID == "" {
 		s.ID = newUUID()
+		firstRun = true
+	}
+
+	if firstRun && !s.NoticeSeen {
+		fmt.Fprintln(os.Stderr, "cliamp telemetry is enabled: once per month it sends an anonymous UUID and app version.")
+		fmt.Fprintln(os.Stderr, "Disable anytime with telemetry = false in ~/.config/cliamp/config.toml or by running cliamp --no-telemetry")
+		s.NoticeSeen = true
+		save(path, s)
 	}
 
 	thisMonth := time.Now().UTC().Format("2006-01")

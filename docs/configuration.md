@@ -22,6 +22,9 @@ shuffle = false
 # Start with mono output (L+R downmix)
 mono = false
 
+# Anonymous monthly telemetry ping (UUID + app version)
+telemetry = true
+
 # Shift+Left/Right seek jump in seconds
 seek_large_step_sec = 30
 

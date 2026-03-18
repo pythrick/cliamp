@@ -34,6 +34,9 @@ func run(overrides config.Overrides, positional []string) error {
 		return fmt.Errorf("config: %w", err)
 	}
 	overrides.Apply(&cfg)
+	if cfg.Telemetry {
+		telemetry.Ping(version)
+	}
 
 	// Build provider list: Radio is always available, Navidrome and Spotify if configured.
 	radioProv := radio.New()
@@ -261,6 +264,7 @@ Appearance:
 General:
   -h, --help              Show this help message
   -v, --version           Show the current version
+  --no-telemetry          Disable telemetry for this session
   --upgrade               Upgrade cliamp to the latest release
 
 Examples:
@@ -310,8 +314,6 @@ func main() {
 		}
 		return
 	}
-
-	telemetry.Ping(version)
 
 	if err := run(overrides, positional); err != nil {
 		fmt.Fprintln(os.Stderr, err)
