@@ -22,6 +22,9 @@ shuffle = false
 # Start with mono output (L+R downmix)
 mono = false
 
+# Restore last playlist/track/position when reopening with no CLI args
+resume_session = true
+
 # Shift+Left/Right seek jump in seconds
 seek_large_step_sec = 30
 

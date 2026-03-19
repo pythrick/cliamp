@@ -14,6 +14,7 @@ import (
 	"cliamp/external/radio"
 	"cliamp/external/spotify"
 	"cliamp/external/ytmusic"
+	"cliamp/internal/instance"
 	"cliamp/internal/resume"
 	"cliamp/mpris"
 	"cliamp/player"
@@ -29,6 +30,12 @@ import (
 var version string
 
 func run(overrides config.Overrides, positional []string) error {
+	lock, err := instance.Acquire(overrides.Takeover != nil && *overrides.Takeover)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -128,6 +135,17 @@ func run(overrides config.Overrides, positional []string) error {
 	if err != nil {
 		return err
 	}
+	resumeState := resume.State{}
+	var sessionTracks []playlist.Track
+	if cfg.ResumeSession {
+		resumeState = resume.Load()
+		sessionTracks = resume.LoadQueue()
+	}
+	restoredSession := false
+	if cfg.ResumeSession && len(positional) == 0 && len(resolved.Tracks) == 0 && len(resolved.Pending) == 0 && len(sessionTracks) > 0 {
+		resolved.Tracks = append(resolved.Tracks, sessionTracks...)
+		restoredSession = true
+	}
 
 	// Determine default provider key.
 	defaultProvider := cfg.Provider
@@ -136,7 +154,7 @@ func run(overrides config.Overrides, positional []string) error {
 	}
 
 	// No args + radio provider: stream the built-in radio directly.
-	if len(positional) == 0 && defaultProvider == "radio" {
+	if len(positional) == 0 && defaultProvider == "radio" && !restoredSession {
 		resolved.Pending = append(resolved.Pending, "https://radio.cliamp.stream/streams.m3u")
 	}
 
@@ -174,12 +192,19 @@ func run(overrides config.Overrides, positional []string) error {
 
 	cfg.ApplyPlayer(p)
 	cfg.ApplyPlaylist(pl)
+	if restoredSession {
+		pl.SetIndex(resumeState.CurrentIndex)
+	}
 
 	themes := theme.LoadAll()
 
 	m := ui.NewModel(p, pl, providers, defaultProvider, localProv, themes, cfg.Navidrome, navClient)
+	m.SetResumeSessionEnabled(cfg.ResumeSession)
 	m.SetSeekStepLarge(cfg.SeekStepLargeDuration())
 	m.SetPendingURLs(resolved.Pending)
+	if restoredSession {
+		m.SyncPlaylistCursor()
+	}
 	if len(resolved.Tracks) == 0 && len(resolved.Pending) == 0 {
 		m.StartInProvider()
 	}
@@ -200,8 +225,10 @@ func run(overrides config.Overrides, positional []string) error {
 	}
 
 	// PositionSec == 0 is indistinguishable from "never played"; skip resume.
-	if rs := resume.Load(); rs.Path != "" && rs.PositionSec > 0 {
-		m.SetResume(rs.Path, rs.PositionSec)
+	if cfg.ResumeSession && restoredSession && resumeState.PositionSec > 0 {
+		if track, idx := pl.Current(); idx >= 0 && track.Path != "" {
+			m.SetResume(track.Path, resumeState.PositionSec)
+		}
 	}
 
 	prog := tea.NewProgram(m, tea.WithAltScreen())
@@ -224,8 +251,16 @@ func run(overrides config.Overrides, positional []string) error {
 		}
 		_ = config.Save("theme", fmt.Sprintf("%q", themeName))
 
-		if path, secs := fm.ResumeState(); path != "" && secs > 0 {
-			resume.Save(path, secs)
+		if cfg.ResumeSession {
+			tracks, idx := fm.SessionState()
+			if len(tracks) == 0 {
+				tracks, idx = fm.CurrentSessionState()
+			}
+			_, secs := fm.ResumeState()
+			resume.SaveSession(tracks, resume.State{
+				PositionSec:  secs,
+				CurrentIndex: idx,
+			})
 		}
 	}
 
@@ -261,6 +296,7 @@ Appearance:
 General:
   -h, --help              Show this help message
   -v, --version           Show the current version
+  --takeover              Stop an existing cliamp instance and take over the session lock
   --upgrade               Upgrade cliamp to the latest release
 
 Examples:

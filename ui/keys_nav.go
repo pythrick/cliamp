@@ -312,8 +312,10 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyMsg) tea.Cmd {
 			}
 
 			m.playlist.Add(toAdd...)
+			m.markSessionDirty()
 			newIdx := m.playlist.Len() - len(toAdd)
 			m.playlist.SetIndex(newIdx)
+			m.markSessionDirty()
 			m.plCursor = newIdx
 			m.adjustScroll()
 			if len(toAdd) > 1 {
@@ -342,9 +344,11 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyMsg) tea.Cmd {
 			m.player.ClearPreload()
 			m.resetYTDLBatch()
 			m.playlist.Replace(tracks)
+			m.markSessionDirty()
 			m.plCursor = 0
 			m.plScroll = 0
 			m.playlist.SetIndex(0)
+			m.markSessionDirty()
 			m.focus = focusPlaylist
 			m.navBrowser.visible = false
 			cmd := m.playCurrentTrack()
@@ -364,10 +368,12 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyMsg) tea.Cmd {
 		if len(tracks) > 0 {
 			wasEmpty := m.playlist.Len() == 0
 			m.playlist.Add(tracks...)
+			m.markSessionDirty()
 			m.status.text = fmt.Sprintf("Added %d tracks", len(tracks))
 			m.status.ttl = 80
 			if wasEmpty || !m.player.IsPlaying() {
 				m.playlist.SetIndex(0)
+				m.markSessionDirty()
 				cmd := m.playCurrentTrack()
 				m.notifyMPRIS()
 				return cmd
@@ -385,12 +391,14 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyMsg) tea.Cmd {
 		if rawIdx < len(m.navBrowser.tracks) {
 			t := m.navBrowser.tracks[rawIdx]
 			m.playlist.Add(t)
+			m.markSessionDirty()
 			newIdx := m.playlist.Len() - 1
 			m.playlist.Queue(newIdx)
 			m.status.text = fmt.Sprintf("Queued: %s", t.DisplayName())
 			m.status.ttl = 80
 			if !m.player.IsPlaying() {
 				m.playlist.Next()
+				m.markSessionDirty()
 				cmd := m.playCurrentTrack()
 				m.notifyMPRIS()
 				return cmd

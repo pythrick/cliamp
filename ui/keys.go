@@ -17,18 +17,26 @@ import (
 
 // quit shuts down the player and signals the TUI to exit.
 func (m *Model) quit() tea.Cmd {
-	// Only save resume for seekable tracks:
-	// - local files (not stream)
-	// - HTTP streams with known duration (podcast MP3s, seek-by-reconnect)
-	// Exclude YTDL (position unreliable) and real-time live streams.
+	// Snapshot session state for startup restore.
+	tracks := m.playlist.Tracks()
+	m.exitSession.tracks = append([]playlist.Track(nil), tracks...)
+	m.exitSession.index = m.playlist.Index()
+
+	// Only save resume for tracks we can seek back into:
+	// - local files
+	// - seekable HTTP streams (known duration)
+	// - yt-dlp tracks (seek-by-restart)
+	// Exclude real-time live streams.
 	if track, _ := m.playlist.Current(); track.Path != "" &&
-		!playlist.IsYTDL(track.Path) && !track.IsLive() &&
+		!track.IsLive() &&
+		(m.player.Seekable() || m.player.IsYTDLSeek()) &&
 		m.player.IsPlaying() {
 		if secs := int(m.player.Position().Seconds()); secs > 0 {
 			m.exitResume.path = track.Path
 			m.exitResume.secs = secs
 		}
 	}
+	m.saveSession(true)
 
 	m.player.Close()
 	m.quitting = true
@@ -290,6 +298,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			m.scrobbleCurrent()
 			m.playlist.SetIndex(m.plCursor)
+			m.markSessionDirty()
 			cmd := m.playCurrentTrack()
 			m.notifyMPRIS()
 			return cmd
@@ -652,6 +661,7 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 		if len(m.search.results) > 0 {
 			idx := m.search.results[m.search.cursor]
 			m.playlist.SetIndex(idx)
+			m.markSessionDirty()
 			m.plCursor = idx
 			m.adjustScroll()
 			cmd = m.playCurrentTrack()
@@ -862,8 +872,10 @@ func (m *Model) handlePlMgrTracksKey(msg tea.KeyMsg) tea.Cmd {
 			m.player.ClearPreload()
 			m.resetYTDLBatch()
 			m.playlist.Replace(m.plManager.tracks)
+			m.markSessionDirty()
 			m.plCursor = 0
 			m.playlist.SetIndex(0)
+			m.markSessionDirty()
 			m.adjustScroll()
 			m.plManager.visible = false
 			m.focus = focusPlaylist

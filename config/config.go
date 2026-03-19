@@ -108,10 +108,10 @@ func (y YouTubeMusicConfig) ResolveCredentials(fallbackFn func() (string, string
 
 // Config holds user preferences loaded from the config file.
 type Config struct {
-	Volume          float64            // dB, range [-30, +6]
-	EQ              [10]float64        // per-band gain in dB, range [-12, +12]
-	EQPreset        string             // preset name, or "" for custom
-	Repeat          string             // "off", "all", or "one"
+	Volume          float64     // dB, range [-30, +6]
+	EQ              [10]float64 // per-band gain in dB, range [-12, +12]
+	EQPreset        string      // preset name, or "" for custom
+	Repeat          string      // "off", "all", or "one"
 	Shuffle         bool
 	Mono            bool
 	SeekStepLarge   int                // seconds for Shift+Left/Right seek jumps
@@ -123,6 +123,7 @@ type Config struct {
 	ResampleQuality int                // beep resample quality factor (1–4)
 	BitDepth        int                // PCM bit depth for FFmpeg output: 16 or 32
 	Compact         bool               // compact mode: cap frame width at 80 columns
+	ResumeSession   bool               // restore last playlist/index/position on startup when no args
 	Navidrome       NavidromeConfig    // optional Navidrome/Subsonic server credentials
 	Spotify         SpotifyConfig      // optional Spotify provider (requires Premium)
 	YouTubeMusic    YouTubeMusicConfig // optional YouTube Music provider
@@ -136,6 +137,7 @@ func Default() Config {
 	return Config{
 		Repeat:          "off",
 		SeekStepLarge:   30,
+		ResumeSession:   true,
 		SampleRate:      0,
 		BufferMs:        100,
 		ResampleQuality: 4,
@@ -271,6 +273,8 @@ func Load() (Config, error) {
 				}
 			case "compact":
 				cfg.Compact = val == "true"
+			case "resume_session":
+				cfg.ResumeSession = val == "true"
 			}
 		}
 	}

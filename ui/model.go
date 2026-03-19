@@ -13,6 +13,7 @@ import (
 	"cliamp/config"
 	"cliamp/external/local"
 	"cliamp/external/navidrome"
+	"cliamp/internal/resume"
 	"cliamp/mpris"
 	"cliamp/player"
 	"cliamp/playlist"
@@ -172,9 +173,20 @@ type Model struct {
 		path string
 		secs int
 	}
+	exitSession struct {
+		tracks []playlist.Track
+		index  int
+	}
 
 	// preloading is true while a preloadStreamCmd goroutine is in-flight.
 	preloading bool
+
+	sessionSave struct {
+		enabled     bool
+		dirty       bool
+		dirtyAt     time.Time
+		lastPosSave time.Time
+	}
 
 	// Live stream title from ICY metadata (e.g., "Artist - Song")
 	streamTitle string
@@ -253,6 +265,9 @@ func (m *Model) SetAutoPlay(v bool) { m.autoPlay = v }
 // SetCompact enables compact mode which caps the frame width at 80 columns.
 func (m *Model) SetCompact(v bool) { m.compact = v }
 
+// SetResumeSessionEnabled enables periodic session autosave.
+func (m *Model) SetResumeSessionEnabled(v bool) { m.sessionSave.enabled = v }
+
 // SetSeekStepLarge configures the Shift+Left/Right seek jump amount.
 func (m *Model) SetSeekStepLarge(d time.Duration) {
 	switch {
@@ -305,6 +320,74 @@ func (m *Model) SetResume(path string, secs int) {
 // Called after prog.Run() returns (player already closed).
 func (m Model) ResumeState() (path string, secs int) {
 	return m.exitResume.path, m.exitResume.secs
+}
+
+// SessionState returns the playlist/session state captured at exit.
+func (m Model) SessionState() (tracks []playlist.Track, index int) {
+	return m.exitSession.tracks, m.exitSession.index
+}
+
+// CurrentSessionState returns session state from the active playlist model.
+// This is used as a fallback when quit() wasn't the shutdown path.
+func (m Model) CurrentSessionState() (tracks []playlist.Track, index int) {
+	src := m.playlist.Tracks()
+	tracks = append([]playlist.Track(nil), src...)
+	return tracks, m.playlist.Index()
+}
+
+func (m *Model) markSessionDirty() {
+	if !m.sessionSave.enabled {
+		return
+	}
+	m.sessionSave.dirty = true
+	m.sessionSave.dirtyAt = time.Now()
+}
+
+func (m Model) resumePositionSec() int {
+	track, idx := m.playlist.Current()
+	if idx < 0 || track.Path == "" || track.IsLive() {
+		return 0
+	}
+	if !m.player.IsPlaying() || (!m.player.Seekable() && !m.player.IsYTDLSeek()) {
+		return 0
+	}
+	if secs := int(m.player.Position().Seconds()); secs > 0 {
+		return secs
+	}
+	return 0
+}
+
+func (m Model) saveSession(includePlaylist bool) {
+	if !m.sessionSave.enabled {
+		return
+	}
+	tracks, idx := m.CurrentSessionState()
+	state := resume.State{
+		CurrentIndex: idx,
+		PositionSec:  m.resumePositionSec(),
+	}
+	if includePlaylist {
+		resume.SaveSession(tracks, state)
+		return
+	}
+	resume.Save(state)
+}
+
+func (m *Model) autosaveSessionTick() {
+	if !m.sessionSave.enabled {
+		return
+	}
+	now := time.Now()
+	if m.sessionSave.dirty && now.Sub(m.sessionSave.dirtyAt) >= 800*time.Millisecond {
+		m.saveSession(true)
+		m.sessionSave.dirty = false
+		m.sessionSave.lastPosSave = now
+		return
+	}
+	if now.Sub(m.sessionSave.lastPosSave) >= 15*time.Second {
+		m.saveSession(false)
+		m.sessionSave.lastPosSave = now
+	}
 }
 
 // ThemeName returns the current theme name.
@@ -437,6 +520,20 @@ func (m *Model) switchProvider(idx int) tea.Cmd {
 func (m *Model) SetPendingURLs(urls []string) {
 	m.pendingURLs = urls
 	m.feedLoading = len(urls) > 0
+}
+
+// SyncPlaylistCursor aligns the UI cursor with the current playlist index.
+func (m *Model) SyncPlaylistCursor() {
+	if m.playlist.Len() == 0 {
+		m.plCursor = 0
+		m.plScroll = 0
+		return
+	}
+	m.plCursor = m.playlist.Index()
+	if m.plCursor < 0 {
+		m.plCursor = 0
+	}
+	m.adjustScroll()
 }
 
 // SetEQPreset sets the preset index by name. Returns true if found.
@@ -646,6 +743,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		m.autosaveSessionTick()
 		// Cache expensive player state once per tick so View() render
 		// functions don't re-acquire speaker.Lock() multiple times.
 		if !m.buffering {
@@ -753,6 +851,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.maybeScrobble(finishedTrack, fullDur, fullDur)
 
 			m.playlist.Next()
+			m.markSessionDirty()
 			m.plCursor = m.playlist.Index()
 			m.adjustScroll()
 			m.titleOff = 0
@@ -826,6 +925,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.resetYTDLBatch()
 		m.playlist.Replace(msg)
+		m.markSessionDirty()
 		m.plCursor = 0
 		m.plScroll = 0
 		m.focus = focusPlaylist
@@ -891,6 +991,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.playlist.Add(msg.tracks...)
+		m.markSessionDirty()
 		m.ytdlBatch.offset += len(msg.tracks)
 		if len(msg.tracks) < ytdlBatchSize {
 			m.ytdlBatch.done = true
@@ -904,6 +1005,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.feedLoading = false
 		if len(msg.tracks) > 0 {
 			m.playlist.Add(msg.tracks...)
+			m.markSessionDirty()
 			m.status.text = fmt.Sprintf("Loaded %d track(s)", len(msg.tracks))
 			m.status.ttl = 60
 			// Set up incremental loading for YouTube Radio playlists.
@@ -931,6 +1033,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg) > 0 {
 			startIdx := m.playlist.Len()
 			m.playlist.Add(msg...)
+			m.markSessionDirty()
 			for i := startIdx; i < m.playlist.Len(); i++ {
 				m.playlist.Queue(i)
 			}
@@ -968,10 +1071,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.player.ClearPreload()
 			m.resetYTDLBatch()
 			m.playlist.Replace(msg.tracks)
+			m.markSessionDirty()
 			m.plCursor = 0
 			m.plScroll = 0
 		} else {
 			m.playlist.Add(msg.tracks...)
+			m.markSessionDirty()
 		}
 		m.focus = focusPlaylist
 		m.status.text = fmt.Sprintf("Added %d track(s)", len(msg.tracks))
@@ -979,6 +1084,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.player.IsPlaying() && m.playlist.Len() > 0 {
 			if msg.replace {
 				m.playlist.SetIndex(0)
+				m.markSessionDirty()
 			}
 			cmd := m.playCurrentTrack()
 			m.notifyMPRIS()
@@ -1020,6 +1126,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update the track with the downloaded local file and metadata.
 		m.playlist.SetTrack(msg.index, msg.track)
+		m.markSessionDirty()
 		// Play the local file (seekable).
 		cmd := m.playTrack(msg.track)
 		m.notifyMPRIS()
@@ -1115,6 +1222,7 @@ func (m *Model) nextTrack() tea.Cmd {
 		m.player.Stop()
 		return nil
 	}
+	m.markSessionDirty()
 	m.plCursor = m.playlist.Index()
 	m.adjustScroll()
 	return m.playTrack(track)
@@ -1139,6 +1247,7 @@ func (m *Model) prevTrack() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	m.markSessionDirty()
 	m.plCursor = m.playlist.Index()
 	m.adjustScroll()
 	return m.playTrack(track)
@@ -1217,9 +1326,10 @@ func (m *Model) applyResume() {
 	if track.Path != m.resume.path {
 		return
 	}
-	// Only seek if the player reports the stream is seekable; otherwise the
-	// seek is a no-op that returns nil, which we must not mistake for success.
-	if !m.player.Seekable() {
+	// Allow resume when:
+	// - the current source is seekable, or
+	// - yt-dlp seek-by-restart is available.
+	if !m.player.Seekable() && !m.player.IsYTDLSeek() {
 		return
 	}
 	target := time.Duration(m.resume.secs) * time.Second
